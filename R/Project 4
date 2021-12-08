@@ -1,0 +1,150 @@
+---
+title: "HW5"
+author: "Filip Bergkvist"
+date: "12/1/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Excercise 1: Lööf vs Löfven
+
+```{r , echo = TRUE}
+load("../HW_data/LoofLofvenTweets.Rdata")
+```
+
+## a.
+
+Filtrerar bort alla värden som är med i båda tabellerna baserat på 'status_id'.
+Detta görs genom att först joina tabellerna så att alla observationer från båda tabellerna är med. Därefter undersöker vi vilka som är dubletter(samma 'status_id') och tar bort båda dessa värden från vår slutgiltiga tabell.  
+
+
+```{r , echo = TRUE, warning = FALSE, message=FALSE}
+library(tidyverse)
+library(stringr)
+tweets <- bind_rows(Lofven , 
+                    Loof , 
+                    .id = "Person")
+Common_rows <- tweets[duplicated(tweets$status_id),]
+tweets <- tweets %>% 
+  filter(!((tweets$status_id %in% 
+              Common_rows$status_id)))
+tweets <- tweets %>% mutate(Person = str_replace_all(tweets$Person, '1', 'Löfven'))
+tweets <- tweets %>% mutate(Person = str_replace_all(tweets$Person, '2', 'Lööf'))
+```
+
+## b.
+
+Vi kan se att det var flest tweets innehållande ordet 'Statsminister'/'statsminister' mellan 22-23 november. Därefter kan vi se att tweets som nämner 'Löfven' i högre grad innefattar ordet 'Stadsminister'/'stadsminister' vilket kan tyckas är rimligt.  
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+library(ggplot2)
+tweets %>% select(Person, created_at, text) %>% 
+  filter(str_detect(text, pattern = 'statsminister|Statsminister')) %>%
+  arrange(created_at) %>% 
+  ggplot(aes(x = created_at, 
+             fill = Person)) + 
+  geom_histogram() + 
+  xlab("Datum") + 
+  ylab("Antal tweets") 
+ 
+```
+
+
+## c. 
+
+Vi kan se 'the average strength' av ord som används i tweets innehållande Lööf kontra Löfven i de två tabellerna nedan. I tweets som innefattar 'Lööf' var den genomsnittliga styrkan högst den 21:a november. Den dagligt genomsnittliga styrkan i orden från tweets var generellt mer volatil i tweets med 'Lööf' än med 'Löfven'. 
+
+```{r , message = FALSE, warning = FALSE}
+sentiment_lexicon <- read.csv("https://svn.spraakdata.gu.se/sb-arkiv/pub/lmf/sentimentlex/sentimentlex.csv") %>% 
+  select(word, strength)
+tweets <- tweets %>% 
+  select(Person, 
+         created_at, 
+         text) %>% 
+  separate_rows(text, 
+                sep = "\\s+")
+#Vi mergear på gemensamma ord till ny tabell:
+daily_average_strength <- merge(tweets, 
+                                sentiment_lexicon, 
+                                by.x = "text", 
+                                by.y = "word", 
+                                all = FALSE) %>% 
+                          arrange(created_at) %>% 
+                          mutate(created_at = as.Date(created_at),                                                 strength = as.numeric(strength)) %>% 
+                          
+                          group_by(Person, created_at) %>% 
+                          mutate(daily_average = mean(strength)) %>%
+                          group_by(Person, created_at, daily_average) %>%
+                          summarise() 
+ggplot(daily_average_strength, aes(x = created_at, y = daily_average)) +
+  geom_line() + 
+  facet_wrap(~Person) + 
+  ylab("Daily average strength of words") + 
+  xlab("Date")  
+  
+```
+
+
+# Excercise 2: Nobel API
+
+
+## a. 
+
+'Nobel_prizes_literature' görs om till en lista i det första steget i uppgift 2b)'. 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(httr)
+Nobel_prizes_literature <- GET("http://api.nobelprize.org/v1/prize.json?category=literature")
+http_type(Nobel_prizes_literature)
+stop_words_url <- "https://raw.githubusercontent.com/stopwords-iso/stopwords-en/master/stopwords-en.txt"
+stopwords <- read_table(stop_words_url, 
+                        col_names = "words")
+```
+
+## b. 
+
+(Koden nedan är ett resultat av mycket trial and error, finns säkert smidigare sätt att lösa uppgiften)
+
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(data.table)
+library(purrr)
+library(jsonlite)
+library(wordcloud)
+# Vi börjar med att göra om data till en data-table. 
+motivations_literature <- fromJSON(content(Nobel_prizes_literature, as = "text")) %>% 
+  as.data.frame %>% 
+  map(as.data.table)
+# Vi väljer ut columnen där motivering finns(tillsammmans med 4 andra variabler)
+motivations_literature <- motivations_literature$prizes.laureates
+  
+  
+motivations_literature <- 
+  motivations_literature %>% 
+  gather() %>% 
+  
+  #Av någon anledning blev det en dubblett av varje observation. Åtgärdas:
+  filter(row_number() %% 2 == 1) %>% 
+  filter(str_detect(key, 'motivation')) %>% 
+  
+  # Delar upp motiveringen till ett ord per rad. 
+  separate_rows(value, sep = "\\s+") %>% 
+  select(value) %>% 
+  
+  # Tar bort alla parenteser eller kommatecken som kan förekomma
+  mutate(value = str_replace_all(value, "[[:punct:]]", "")) %>% 
+  
+  # Filtrerar bort alla ord som förekommer i stopwordstabellen
+  filter(!(value %in% stopwords$words)) %>% 
+  group_by(value) %>% 
+  count() %>% 
+  arrange(desc(n))
+wordcloud(words = motivations_literature$value, 
+          freq = motivations_literature$n, 
+          random.order = FALSE)
+```
+
+Vi kan se att de mest förekommande orden i motiveringarna till litteraturpriset är 'poetic', 'human', 'poetry' och 'life'. 
