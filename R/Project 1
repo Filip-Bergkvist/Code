@@ -1,0 +1,207 @@
+---
+title: "HW4.Rmd"
+author: "Filip Bergkvist"
+date: "11/24/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Exercise 1: SQL, SQl, Sql, sql!
+
+Vi börjar med att läsa in data. 
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+library(dplyr)
+library(RSQLite)
+library(sqldf)
+library(ggplot2)
+con <- dbConnect(RSQLite::SQLite(), "../HW_data/chinook.db")
+```
+
+
+
+## b. 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+average_unitprice <- dbGetQuery(con, "SELECT AVG(UnitPrice) FROM tracks")
+average_unitprice
+tracks <- dbReadTable(con, "tracks")
+tracks %>% 
+  group_by(UnitPrice) %>% 
+  ggplot(aes(x = UnitPrice)) + 
+  geom_histogram(bins = 50) + 
+  geom_vline(xintercept = average_unitprice$`AVG(UnitPrice)`,
+             col = "Blue ")
+```
+
+Den vertikala blåa linjen representerar det genomsnittliga priset per enhet från tabellen 'tracks'. Det genomsnittliga priset är, enligt uträkning i koden ovan, 1.050805. 
+
+
+## c. 
+
+Vi kan se att genren 'Opera' bara har ett spår. 
+
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+number_tracks <- dbGetQuery(con, "SELECT COUNT(*) as 'Number of tracks', genres.Name as 'Genre'
+                            FROM tracks 
+                            INNER JOIN genres 
+                            ON tracks.GenreId = genres.GenreId 
+                            GROUP BY tracks.GenreId 
+                            ORDER BY COUNT(*) 
+                            LIMIT 1")
+knitr::kable(number_tracks)
+```
+
+## d.
+
+Genren 'Rock' har med sina 1297 spår flest, de ligger i spellistan 'Music'. 
+
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+tracks_in_playlist <- dbGetQuery(con, "SELECT COUNT(*) as 'Number of Tracks', playlists.Name as 'Playlist', genres.Name as 'Genre' 
+                                 FROM tracks 
+                                 INNER JOIN genres 
+                                 INNER JOIN playlist_track 
+                                 INNER JOIN playlists 
+                                 ON tracks.GenreId = genres.GenreId 
+                                 AND playlist_track.TrackId = tracks.TrackId 
+                                 AND playlist_track.PlaylistId = playlists.PlaylistId
+                                 GROUP BY tracks.GenreId, playlist_track.PlaylistId
+                                 ORDER BY COUNT(tracks.TrackId) DESC 
+                                 LIMIT 1")
+knitr::kable(tracks_in_playlist)
+```
+
+## e. 
+
+Vi kan se att 'Steve Harris' har flest spår(=80), de ligger i spellistan 'Music'. 
+
+
+```{r , echo = TRUE, message= FALSE,warning=FALSE}
+most_tracks_composer <- dbGetQuery(con, "SELECT COUNT(*) as 'Number of tracks', Composer, playlists.Name as 'Playlist'
+                                   FROM tracks 
+                                   JOIN playlist_track 
+                                   JOIN playlists 
+                                   ON tracks.TrackId = playlist_track.TrackId
+                                   AND playlist_track.PlaylistId = playlists.PlaylistId
+                                   WHERE Composer IS NOT NULL 
+                                   GROUP BY Composer, playlist_track.PlaylistId 
+                                   ORDER BY COUNT(tracks.TrackId) DESC 
+                                   LIMIT 1 ")
+knitr::kable(most_tracks_composer)
+```
+
+
+# Exercise 2: Skolverket's information about 6th graders
+
+
+## a. 
+
+Vi läser in csv filen med funktionen "read.csv" och filtrerar resultatet till 'Samtliga' för varje kommun. Enligt informationen från skolverket innebär (.) att data saknas, (..) att resultatet baseras på färre än 10 elever, (~100) om antalet som ej uppnått kunskapskraven är 1-4 elever samt (-) om ett betyg inte har kunnat sättas på eleven. 
+
+I och med att dessa antingen behandlar värden som saknas eller väldigt litet urval, är det enklast att göra om dessa till NA:s när vi läser in datafilen. 
+
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE }
+Schools_data <- read.csv("../HW_data/exp_betyg_ak6_kommun_2018_19.csv",
+                         na.strings =c(".","..","-","~100"), 
+                         skip = 6, 
+                         sep = ";") %>% 
+  filter(Typ.av.huvudman == "Samtliga")
+```
+
+
+## b. 
+
+Vi börjar med att göra om variablerna 'Flickor' och 'Pojkar', där vi ser till att ta bort mellanslag mellan värdet för att undvika NAs. Vi gör samma sak på det genomsnittliga betyget i 'Flickor.2' samt 'Pojkar.2' och byter ut kommatecken mot punkt (matematiska beräkningar verkade inte fungera när kommatecken fanns i värdet).
+
+Vi räknar ut den totala betygspoängen i alla ämnen och län fördelat på kön, och delar sedan med totala antalet pojkar/flickor för att få till ett medelvärde i varje län. 
+
+Jag valde en barplot för att den tydligt visar skillnaden i det genomsnittliga betyget mellan pojkar och flickor.
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(reshape2)
+Average_grades <- Schools_data %>%  
+  
+  mutate(Flickor = as.numeric(gsub(" ", "",as.character(Flickor))), 
+         Pojkar = as.numeric(gsub(" ","", as.character(Pojkar))),
+         Flickor.2 = as.numeric(gsub(",",".", as.character(Flickor.2))),
+         Pojkar.2 = as.numeric(gsub(",",".", as.character(Pojkar.2)))) %>%
+  
+  mutate(Total_grades_girls = (Flickor * Flickor.2), 
+         Total_grades_boys = (Pojkar * Pojkar.2)) %>% 
+  
+  group_by(Län) %>% 
+  
+  summarise(Average_grades_boys = (sum(Total_grades_boys, na.rm = TRUE)/sum(Pojkar, na.rm = TRUE)), 
+            Average_grades_girls = (sum(Total_grades_girls, na.rm = TRUE) / sum(Flickor, na.rm = TRUE))) 
+melt(Average_grades, id = c("Län")) %>% 
+  ggplot() + geom_bar(aes(x = Län,
+                          y = value , 
+                          fill = variable), 
+                      stat = "identity", 
+                      position = "dodge") + 
+  theme(axis.text.x = element_text(angle = 45,
+                                   vjust = 1,
+                                   hjust = 1)) + 
+  ggtitle("Average grades in each county") + 
+  ylab("Average grade") + 
+  xlab("County")
+```
+
+
+## c. 
+
+Kartan visar de kommuner där genomsnittliga betyget i 'Engelska' är högre än i 'Idrott och hälsa'. Är de genomsnittliga betygen lika i någon kommun räknas det som 'FALSE' i kartan. 
+
+Man kan se på kartan att det varierar mycket mellan kommuner om vilket genomsnittligt betyg som är högst. Vi ser alltjämt att fler kommuner verkar rapportera högre genomsnittligt betyg i 'Idrott och hälsa' än i 'Engelska'. Det verkar även som att eleverna i Sveriges tre största städer (Stockholm, Göteborg och Malmö) har högre genomsnittligt betyg i 'Engelska' än i 'Idrott och hälsa'. 
+Enligt datan vi får fram nedan har elever i 105 kommuner högre genomsnittligt betyg i 'Engelska' än i 'Idrott..' , och i 184 kommuner har elever inte högre genomsnittligt betyg i 'Engelska' än i 'Idrott..'. 
+
+```{r , echo = TRUE, message = FALSE, warning = FALSE}
+library(readr)
+kommun_karta <- read_csv("../HW_data/kommun_karta.csv")
+Engelska_vs_Idrott  <- Schools_data %>% 
+  group_by(Kommun) %>% 
+  filter(Ämne == c("Engelska", "Idrott och hälsa")) %>% 
+  arrange(Kommun) %>% 
+  select(Kommun, Ämne, Totalt.2, Kommun.kod) %>% 
+  mutate(Totalt.2 = as.numeric(gsub(",",".", as.character(Totalt.2)))) %>% 
+  mutate(Idrott_hälsa = Ämne, Idrott_betyg = Totalt.2) %>%
+  mutate_at(c("Idrott_hälsa", "Idrott_betyg"), list(lead), n = 1) %>%
+  filter(row_number() %% 2 == 1) %>% 
+  mutate(Engelska_bättre = (Totalt.2 > Idrott_betyg))
+Engelska_vs_Idrott$Kommun.kod <- as.numeric(Engelska_vs_Idrott$Kommun.kod)
+kommun_karta$id <- as.numeric(kommun_karta$id)
+merge(kommun_karta, 
+      Engelska_vs_Idrott, 
+      by.x = "id", 
+      by.y = "Kommun.kod", 
+      all = FALSE)  %>%
+  
+   ggplot(aes(x = long, 
+             y = lat,
+             group = id, 
+             fill = Engelska_bättre )) +
+  geom_polygon() + 
+  coord_fixed() +  
+  #theme_void() 
+  theme_minimal()
+```
+
+## d.
+
+Vi kan se att genomsnittliga betyget i 'Engelska' och 'Idrott och hälsa' ligger väldigt nära varandra. Detta stämmer överens med kartan i uppgift c) där större delen av kartan visar kommuner där betyget i 'Idrott och hälsa' är högre än i 'Engelska', men där de största städerna(flest invånare) har högre genomsnittligt betyg i 'Engelska'. 
+
+
+```{r, echo = TRUE, warning = FALSE, message = FALSE}
+Overall_mean_Sverige <- Schools_data %>% 
+  mutate(Totalt.2 = as.numeric(gsub(",",".", as.character(Totalt.2)))) %>%
+  group_by(Ämne) %>% 
+  mutate(Genomsnitt_Sverige = mean(Totalt.2, na.rm = TRUE)) %>% 
+  group_by(Ämne, Genomsnitt_Sverige) %>% 
+  summarise()
+knitr::kable(Overall_mean_Sverige)
+```
