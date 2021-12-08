@@ -1,1 +1,194 @@
 
+---
+title: "HW2.Rmd"
+author: "Filip Bergkvist"
+date: "11/10/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exercise 1: Apartment prices
+EkhagenApartments <- read_csv("../HW_data/Booli_sold.csv")
+
+We first used head(EkhagenApartments) to see all the variabels and their name. 
+
+## Task a. Illustrate how Soldprice depends on Livingarea over the period
+
+```{r , echo = TRUE, warning = FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+EkhagenApartments <- read.csv("../HW_data/Booli_sold.csv")
+ggplot(EkhagenApartments, aes( x = livingArea, y = soldPrice)) + 
+  geom_point() + 
+  ggtitle("Soldprice depending on livingarea")
+```
+
+## Task b. Illustrate trends in Soldprice / Livingarea over the period
+
+
+
+
+```{r , echo = TRUE}
+EkhagenApartments$soldDate <- as.Date(EkhagenApartments$soldDate)
+ggplot(EkhagenApartments, aes( x = soldDate, y = soldPrice)) + 
+  geom_point() + 
+  expand_limits(y = 0) + 
+  ggtitle("Sellingprice over time")
+```
+
+```{r , echo = TRUE, message=FALSE, warning=FALSE}
+ggplot(EkhagenApartments, aes( x = livingArea)) +
+  geom_histogram() + 
+  ggtitle("Distribution of the livingarea in sold apartments")
+```
+
+
+## Task c. Illustrate an aspect of data using a boxplot
+
+```{r , echo = TRUE, warning= FALSE}
+ggplot(EkhagenApartments, aes( x = rooms, group = rooms, y = soldPrice)) +
+  
+  geom_boxplot() + 
+  
+  ggtitle("Boxplot over soldprice based on number of rooms")
+```
+
+# Excercise 2: Folkhälsomyndigheten COVID cases and why excel might not be your friend 
+
+## Tasks 
+
+### Data Wrangling 
+
+#### a. 
+Using the function excel_sheets gives us the names of the sheets, if we actually open the excel file we can see what variables are used in each sheet. This gives us following information: 
+
+[1] "Antal per dag region" - Shows the total number of cases each day in every region.  
+
+[2] "Antal avlidna per dag" - Number of deaths each day 
+
+[3] "Antal intensivvårdade per dag" - Number of patients in intensive care each day
+
+[4] "Totalt antal per region" - Shows total number of cases, deaths,patients in intensive care and cases per 100 000 in each region.
+
+[5] "Totalt antal per kön" - Shows total number of cases, deaths and patients in intensive care on both sexes. 
+
+[6]"Totalt antal per åldersgrupp" - Total number of cases, deaths and patients in intensive care per age group(0-9, 10-19, 20-29 etc).
+
+[7] "Veckodata Region"  - Total number of cases, deaths, patients in intensive care each week for every region. 
+
+[8] "Veckodata Kommun_stadsdel" - Total number of cases per 10 000 residents, total number of cases per 10 000 residents each week, total number of cases and total number of new cases each week in every 'Kommun'. 
+
+[9] "FOHM 30 Sep 2020" - Contains a link to the folkhalsomyndigheten webpage.
+
+
+
+#### b.
+I used the code in the following for steps: 
+```{r , echo= TRUE, warning = FALSE}
+library(readxl)
+TheData <- "../HW_data/Folkhalsomyndigheten_covid19.xlsx"
+Covid <- lapply(excel_sheets(TheData), read_excel, path = TheData)
+sheetnames <- excel_sheets(TheData)
+names(Covid) <- sheetnames
+```
+
+
+This stored the data in a list of tibbles dataframes with the sheet name as name of each list. 
+
+#### c. 
+
+```{r , echo=TRUE, message=FALSE, warning=FALSE}
+library(gridExtra)
+table_c_head <- knitr::kable(head(Covid$`Antal avlidna per dag`, 5), caption = "First 5 rows")
+table_c_tail <- knitr::kable(tail(Covid$`Antal avlidna per dag`, 5), caption= "Last 5 rows")
+grid.arrange(tableGrob(table_c_head), tableGrob(table_c_tail), ncol = 2)
+```
+
+We can see that "Uppgift saknas" on the last row in the sheet and that 'Datum_avliden' is not being read correctly. The last row is causing this problem and we need to remove it. I found that the easiest way of doing this is to create a new variable by using the 'read_xlsx' on 'TheData' but only reading the second sheet, and using n_max thus removing the last row. 
+
+
+```{r , echo = TRUE}
+Second_sheet <- read_xlsx(TheData, sheet = 2, n_max = 203)
+table_c_tail <- knitr::kable(tail(Second_sheet, 5), caption= "Last 5 rows")
+table_c_tail
+```
+
+#### d.
+
+We start by checking which type the column 'Stadsdel' has by using 'lapply(Covid$`Veckodata Kommun_stadsdel`, class)'. We see that the column has a logical type and thus we want to change it to character column since it represents a 'stadsdel'. We simply do this by 
+
+```{r, echo = TRUE}
+Covid$`Veckodata Kommun_stadsdel`$Stadsdel <- as.character(Covid$`Veckodata Kommun_stadsdel`$Stadsdel)
+lapply(Covid$`Veckodata Kommun_stadsdel`, class)
+```
+and can see that it has been changed to 'character'. 
+
+#### e. 
+We can see from the previous question that the columns 'tot_antal_fall' and 'nya_fall_vecka' both has 'character' type. It could be that since there is non-integer values in the same column the entire column gets parsed as 'character' type. After we have changed the column to numeric every non-integer value in the same column will be 'NA'. 
+
+We change these to numeric by applying code 
+
+```{r, echo = TRUE, warning = FALSE}
+Covid$`Veckodata Kommun_stadsdel` <- 
+  Covid$`Veckodata Kommun_stadsdel` %>% 
+  mutate(tot_antal_fall = as.numeric(tot_antal_fall), 
+         nya_fall_vecka = as.numeric(nya_fall_vecka))
+lapply(Covid$`Veckodata Kommun_stadsdel`, class)
+```
+
+
+### Statistics and plotting
+
+#### a. 
+Total number of cases each region:
+
+```{r , echo = TRUE, message=FALSE}
+Total_cases_region <- Covid$`Totalt antal per region` %>%
+  
+  group_by(Totalt_antal_fall, Region) %>%
+  
+  summarise(Totalt_antal_fall)
+Total_cases_region %>% print(n = Inf)
+```
+
+Total number of cases overall: 
+
+```{r , echo = TRUE}
+Total_number_of_cases <- sum(Covid$`Totalt antal per region`$Totalt_antal_fall)
+Total_number_of_cases
+```
+
+To find out which region has the most/least number of cases we could use the max()/min() function but since we have the table above it's easy to see that 'Stockholm' has the most number of cases and 'Gotland' the least. Other variables has to be accounted for in order for total number of cases to be relevant. Such variables should include number of residents, populationdensity etc. 
+
+#### b. 
+
+```{r , echo = TRUE , warning = FALSE}
+Second_sheet$'Datum_avliden' <- as.Date(Second_sheet$'Datum_avliden')
+ggplot(Second_sheet, aes( x = Datum_avliden, y = Antal_avlidna, group = 1)) + 
+  geom_line() + 
+  ggtitle("Number of deceased people each day ") + 
+  scale_x_date(limits = c(as.Date("2020-03-15"), NA)) + 
+  ylab("Antal avlidna") + 
+  xlab("Datum")
+```
+
+
+#### c. 
+
+
+```{r , echo = TRUE, message = FALSE, warning = FALSE}
+task_c <- Covid$`Veckodata Kommun_stadsdel` %>% 
+  
+  group_by(tot_antal_fall, nya_fall_vecka, veckonummer) %>%
+  
+  summarise(tot_antal_fall)
+ggplot(task_c , aes( x = veckonummer, y = tot_antal_fall)) + 
+  geom_col() + 
+  ggtitle("Total number of cases")
+ggplot(task_c , aes( x = veckonummer, y = nya_fall_vecka)) + 
+  geom_col() + 
+  ggtitle("New cases each week ")
+```
