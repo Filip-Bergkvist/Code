@@ -1,0 +1,138 @@
+---
+title: "HW6"
+author: "Filip Bergkvist"
+date: "12/3/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+# Exercise 1: Purrr
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+library(purrr)
+library(jsonlite)
+library(tidyverse)
+library(httr)
+library(data.table)
+```
+
+
+## a. 
+
+Får error när jag använder map(purrr) för att skapa en dataframe med alla kolumner, det står att de måste ha 'compatible sizes'. Valde att skapa en dataframe med alla kolumner på annat sätt.
+
+```{r , echo = TRUE, warning = FALSE, message= TRUE}
+Nobel_economics <- GET("http://api.nobelprize.org/v1/prize.json?year=1969&yearTo=2019&category=economics")
+Laureates_economics <- fromJSON(content(Nobel_economics , as = "text")) %>%
+  as.data.frame() %>%  
+  map(as.data.table)
+Laureates_economics$prizes.laureates <- 
+  Laureates_economics$prizes.laureates %>% gather()
+# Skapar 5 dataframes med en kolumn vardera:
+firstname <- 
+  Laureates_economics$prizes.laureates %>% 
+  filter(str_detect(key, 'firstname')) %>% 
+  select(value)
+surname <- 
+  Laureates_economics$prizes.laureates %>% 
+  filter(str_detect(key, 'surname')) %>% 
+  select(value)
+id <- 
+  Laureates_economics$prizes.laureates %>% 
+  filter(str_detect(key, 'id')) %>% 
+  select(value)
+year <- 
+  Laureates_economics$prizes.year
+category <- 
+  Laureates_economics$prizes.category
+# Vi gör listorna year och category lika stora som de andra:
+year <- year[rep(seq_len(nrow(year)), each = 3),]
+category <-  category[rep(seq_len(nrow(category)), each = 3),]
+# Skapar en dataframe med alla kolumner från listorna ovan.  
+laureates <- as.data.frame(list(year, 
+                                category, 
+                                firstname, 
+                                surname, 
+                                id))
+# Ser till så att inga dubletter förekommer:
+laureates <- laureates[!duplicated(laureates$value.2),]
+colnames(laureates) <- c("year", "category", "firstname", "surname", "id")
+knitr::kable(head(laureates))
+```
+
+
+## b.
+
+I koden nedan går det inte att använda pipes hela vägen(?). Vi skapar en ny tabell 'laureates_info' som innehåller 'gender', 'born' samt 'id'. Därefter använder vi 'merge()' funktionen och slår ihop tabellen med tabellen skapad i uppgift a) på gemensamma 'id'. 
+
+```{r, echo = TRUE, warning = FALSE, message = TRUE}
+laureates_info <- GET("http://api.nobelprize.org/v1/laureate.json?")
+laureates_info <- fromJSON(content(laureates_info , as = "text")) %>%
+  as.data.frame() %>%  
+  map(as.data.table)
+# Skapar en dataframe med information om alla pristagares kön, födelsedatum samt 'id'. 
+laureates_info <- map_df(laureates_info, 
+                         ~ data.frame(born = laureates_info$laureates.born, 
+                                      id = laureates_info$laureates.id, 
+                                      gender = laureates_info$laureates.gender))
+# Kollar så att ingen pristagare är med mer än en gång samt kollar vilka pristagare som är med i laureates-tabellen från uppgift a):
+laureates_info <- 
+  laureates_info[!duplicated(laureates_info$V1.1),] %>% 
+  filter(V1.1 %in% laureates$id)
+colnames(laureates_info) <- c("day_of_birth", "id", "gender")
+#Slår ihop tabellen 'laureates_info' med 'laureates': 
+laureates_info <- merge(laureates_info, 
+                        laureates, 
+                        by = "id") %>%
+  arrange(desc(year))
+knitr::kable(head(laureates_info))
+```
+
+## c. 
+
+Vi kan se att ca 2.38 % av alla nobelpristagare i ekonomi är kvinnor.
+
+```{r}
+laureates_info %>% group_by(gender) %>% count()
+2/84
+```
+
+## d. 
+
+Tabellen 'geom_smooth()' nedan visar med 95% konfidensintervall förutsägelsen av en linjär modell ("lm"). Enligt dokumentationen visar tabellen the 'predicted value' av Age för varje år och det gröna fältet symboliserar konfidensintervallet. Vi kan se att åldern för en nobelpristagare har förväntats ligga mellan 65-70 år. 
+
+Vi ser från den andra tabellen att åldern har varierat över tid men att det oftast ligger mellan 60-80 år. Vi kan tyda att den äldsta nobelpristagaren i ekonomi var ca 90 år och den yngsta ca 47 år. 
+
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(eeptools)
+library(ggplot2)
+# Ändrar year-kolumnen till första december varje år. 
+laureates_info$year <- paste(laureates_info$year, c("12-01"), sep = "-")
+# Två födelsedatum saknas på id 969 samt 745. Googlar och hittar deras födelsedatum och ändrar manuellt för att slippa na.
+laureates_info <- laureates_info %>% 
+  mutate(day_of_birth = str_replace(laureates_info$day_of_birth, 
+                                    '1955-00-00', 
+                                    replacement = '1955-11-06') )
+# (Detta måste göras i två steg, får error annars) 
+laureates_info <- laureates_info %>%
+  mutate(day_of_birth = str_replace(laureates_info$day_of_birth, 
+                                    '1943-00-00', 
+                                    replacement = '1943-11-07') )
+laureates_info <- laureates_info %>% 
+  mutate(year = as.Date(year),
+         day_of_birth = as.Date(day_of_birth),
+         #Skapar ny kolumn med ålder för varje pristagare  
+         Age = age_calc(day_of_birth, year, units = "years"))
+ggplot(laureates_info, 
+       aes(x = year, 
+           y = Age)) + 
+  geom_smooth(fill = "green")
+ggplot(laureates_info, 
+       aes(x = year, 
+           y = Age)) + 
+  geom_line(color = "blue") + 
+  ggtitle("Age of laureates over time")
+```
