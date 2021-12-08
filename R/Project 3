@@ -1,0 +1,207 @@
+title: "HW3.Rmd"
+author: "Filip Bergkvist"
+date: "11/21/2020"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+# Excercise 1: Marketing, conversions and conversion lags 
+
+```{r, echo = TRUE, warning=FALSE, message = FALSE}
+library(dplyr)
+library(RSQLite)
+library(sqldf)
+con <- dbConnect(RSQLite::SQLite(), "../HW_data/seo_marketing_data.sqlite")
+df_clicks <- dbReadTable(con, "Clicks")
+df_conversion <- dbReadTable(con, "Conversion_value")
+```
+
+## Tasks
+
+### a. 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(ggplot2)
+df_clicks$date <- as.Date(df_clicks$date)
+df_conversion$date <- as.Date(df_conversion$date)
+df_clicks %>% ggplot(aes(x = date)) + 
+  geom_density() + 
+  ggtitle("Distribution of clicks over time")
+```
+
+### b.
+We can see that Thursday has the highest value in total. 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(lubridate)
+week_days <- wday(df_conversion$date, label = TRUE)
+ggplot(df_conversion, aes(x = week_days, y = value)) + 
+  geom_bar(stat = "identity")
+```
+
+### c. 
+ 
+
+```{r , echo = TRUE, message = FALSE, warning = FALSE}
+ggplot(df_conversion, aes(value)) + 
+  
+  geom_histogram() + 
+  
+  ggtitle("Distribution of value from customers")
+```
+
+### d.
+We use the 'skim()' function from the 'skimr' package and notice that the number of rows, meaning observations is less in 'df_conversion' than in 'df_clicks'. We use the merge function to only keep the customers that clicked on an ad and actually bought/converted.We converted the variables to 'Dates' and plotted a histogram of the difference in dates. 
+
+```{r , echo= TRUE, warning = FALSE, message=FALSE}
+new_table <- merge(df_clicks, 
+                   df_conversion, 
+                   by = ("id"), 
+                   all = FALSE)
+new_table <- new_table %>% 
+  mutate(date.x = as.Date(date.x) ,
+         date.y = as.Date(date.y))
+ggplot(new_table, aes( x = date.y - date.x)) + 
+  
+  geom_histogram() + 
+  
+  ggtitle("Distribution of Conversion Lag") + 
+  
+  xlab("Number of days")
+```
+
+We can see that it is difficult to draw any conclusions from the histogram. We can however determine that the maximum amount of days between an clicked ad to a bought product is just around 30 days. We can also see that the mean should be more than 15 since there are higher 'spikes' in the right side of the histogram. 
+
+
+### e. 
+
+The table below shows the number of days until conversion each date. The value that is displayed in the boxes is the number of customers that had so many days for conversion that specific date.  
+
+For example there were two customers with 28 days conversion lag on 2020-06-01.
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+library(tidyr)
+CLdays_count_each_day <- new_table %>% 
+                         mutate(CL_days = (date.y-date.x)) %>% 
+                         select(date.x, CL_days) %>% 
+                         group_by(date.x) %>% 
+                         count(CL_days) %>% 
+                         spread(key = CL_days, 
+                                value= n) %>%
+                         select(date.x, tail(names(.), 6))
+                        
+  
+colnames(CLdays_count_each_day)[1] <- "Date of click"
+knitr::kable(tail(CLdays_count_each_day, 5))
+knitr::kable(head(CLdays_count_each_day,5))
+```
+
+Here is a table over number of adclicks each day: 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+sum_of_clicks <- df_clicks %>% 
+                 select(date, id) %>% 
+                 group_by(date) %>% 
+                 count()
+sum_of_clicks_version2 <- sum_of_clicks %>% 
+                          mutate(value = 1:n()) %>% 
+                          spread(key = n, value = value)
+colnames(sum_of_clicks)[2] <- "Number of clicks"
+colnames(sum_of_clicks)[1] <- "Date"
+knitr::kable(tail(sum_of_clicks, 5))
+knitr::kable(tail(sum_of_clicks_version2, 5))
+```
+
+# Excercise 2: SL lines
+
+## Tasks
+
+### a. 
+
+From the webpage 'https://www.trafiklab.se/api/sl-hallplatser-och-linjer-2/dokumentation' I got the following info of some of the variables. 
+
+StopPoint - is a 'Stoppoint' and is a part of 'StopArea'
+
+StopArea - is a group of StopPoints with the same 'trafikslag' and name within a certain geographical area, for example a 'terminal'. 
+
+SiteId - is a group of StopAreas and is used to simplify the search in the travel planning. 
+
+We can see that two of the tables, that I named SL_stopareas and SL_stopPoints are identical. The table SL_sites contains SiteId and StopArea but does not contan StopPoint. However StopPoint is present in the tables SL_stoparea and SL_stopPoints. 
+
+### b. 
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+SL <- dbConnect(RSQLite::SQLite(), "../HW_data/sl-api.sqlite")
+SL_journeypatterns <- dbReadTable(SL, "journeyPatterns")
+SL_lines <- dbReadTable(SL, "lines")
+SL_sites <- dbReadTable(SL, "sites")
+SL_stopareas <- dbReadTable(SL, "stopAreas")
+SL_stopPoints <- dbReadTable(SL, "stopPoints")
+SL_transportmodes <- dbReadTable(SL, "transportmodes")
+SL_sites <- SL_sites %>% 
+  mutate(StopAreaNumber = as.numeric(StopAreaNumber), 
+         SiteId = as.numeric(SiteId))
+SL_stopareas <- SL_stopareas %>% 
+  mutate(StopPointNumber = as.numeric(StopPointNumber) , 
+         StopAreaNumber = as.numeric(StopAreaNumber))
+SL_stopPoints <- SL_stopPoints %>% 
+  mutate(StopPointNumber = as.numeric(StopPointNumber) , 
+         StopAreaNumber = as.numeric(StopAreaNumber))
+```
+
+### c. 
+
+Table of unique rail traffic stops in each zone:
+
+```{r , echo = TRUE, warning = FALSE, message = FALSE}
+unique_stoppoints <- SL_stopPoints %>% 
+  filter(StopAreaTypeCode %in% c("METROSTN", "RAILWSTN", "TRAMSTN")) %>%
+  group_by(ZoneShortName) %>% 
+  summarise(n_distinct(StopPointNumber))
+unique_stoppoints = unique_stoppoints[-1,]
+colnames(unique_stoppoints)[2] = "Unique Stoppoints"
+knitr::kable(unique_stoppoints)
+```
+
+### d. 
+
+In the code below, you simply need to change the LineNumber if you want to plot another line. I've demonstrated this by showing line 1 and 2. (In R you get the labels on each point by clicking on it)
+
+```{r , echo = TRUE, warning = FALSE, message= FALSE}
+library(leaflet)
+library(mapview)
+library(htmlwidgets)
+library(webshot)
+options(digits = 22)
+SL_journeypatterns$JourneyPatternPointNumber <- as.numeric(SL_journeypatterns$JourneyPatternPointNumber)
+table_line <- merge(SL_journeypatterns, 
+                 SL_stopareas,
+                 by.x = "JourneyPatternPointNumber" ,
+                 by.y = "StopPointNumber",  
+                 all = FALSE) %>% 
+                 mutate(LocationNorthingCoordinate = as.numeric(LocationNorthingCoordinate), 
+                        LocationEastingCoordinate = as.numeric(LocationEastingCoordinate),
+                        LineNumber = as.numeric(LineNumber)) %>% 
+                 group_by(LineNumber) %>% 
+                 arrange(LineNumber)
+the_map <- table_line %>% 
+  filter(LineNumber == 1) %>% 
+  leaflet() %>%
+  addTiles() %>% 
+  addMarkers(lng = ~LocationEastingCoordinate,
+             lat = ~LocationNorthingCoordinate, 
+             popup = ~StopPointName)
+mapshot(the_map, file = "Leaflet-plot.png")
+knitr::include_graphics("Leaflet-plot.png")
+the_map2 <- table_line %>% 
+  filter(LineNumber == 2) %>% 
+  leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(lng = ~LocationEastingCoordinate, 
+             lat = ~LocationNorthingCoordinate,
+             popup = ~StopPointName)
+mapshot(the_map2, file = "Leaflet2-plot.png")
+knitr::include_graphics("Leaflet2-plot.png")
+```
