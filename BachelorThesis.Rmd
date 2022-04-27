@@ -4,12 +4,389 @@ Author: Filip Bergkvist
 This is the code used for the thesis: 
 
 ```{r}
+library(quantmod)
+library(caret)
+library(gbm)
+library(tidyverse)
+library(randomforest) 
+
+#Extract variable values from "yahoo". 
 
 tickers = c("^OMX", "^GSPC", "^N225","^IXIC", "GC=F", "CL=F", "SI=F", "NG=F","USDSEK=X","EURSEK=X", "^GSPTSE", "^HSI", "000001.SS") 
 getSymbols(tickers, src="yahoo", from = '2010-01-01', to = "2020-01-01")
 
+# Calculate the Overnight Return of the stock index OMXS30 day t:
+# Overnight return(OMXS30, t) = log(Open,t) - log(Adjusted Close, t-1) 
+# "OMXnight" is the overnight log return
+
+OMX_open = as.data.frame(OMX$OMX.Adjusted) %>% mutate(Open =OMX$OMX.Open)
+OMX_open <- na.omit(OMX_open)
+
+OMX_open <- OMX_open %>% mutate(OMXnight = 1)
+
+for(i in 2:2511) {
+  
+  OMX_open$OMXnight[i] <- log(OMX_open$Open[i]) - log(OMX_open$OMX.Adjusted[i-1])
+  
+}
+OMX_open <- na.omit(OMX_open)
+OMX_open <- OMX_open %>% select(OMXnight) %>% tail(-1)
+
+# Creating intraday returns of stock indices in USA and Canada
+# Lag 1 so that "yesterdays" intraday return of the indices predicts "todays" OMXS30 Overnight return 
+
+# S&P 500
+
+Returns_SP <- as.data.frame(GSPC$GSPC.Adjusted) %>% mutate(Open = GSPC$GSPC.Open)
+Returns_SP <-Returns_SP %>% mutate(Intraday_return = 1)
+
+for(i in 1:2516) {
+  Returns_SP$Intraday_return[i] <- log(Returns_SP$GSPC.Adjusted[i]) - log(Returns_SP$Open[i]) 
+}
+Returns_SP <- Returns_SP %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+Returns_SP <- na.omit(Returns_SP)
+
+# Nasdaq Composite
+
+Returns_NasUS <- as.data.frame(IXIC$IXIC.Adjusted) %>% mutate(Open = IXIC$IXIC.Open)
+Returns_NasUS <-Returns_NasUS %>% mutate(Intraday_return = 1)
+
+for(i in 1:2516) {
+  Returns_NasUS$Intraday_return[i] <- log(Returns_NasUS$IXIC.Adjusted[i]) - log(Returns_NasUS$Open[i]) 
+}
+
+Returns_NasUS <- Returns_NasUS %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+Returns_NasUS <- na.omit(Returns_NasUS)
+
+# Toronto
+
+Returns_Toronto <- as.data.frame(GSPTSE$GSPTSE.Adjusted) %>% mutate(Open = GSPTSE$GSPTSE.Open)
+Returns_Toronto <-Returns_Toronto %>% mutate(Intraday_return = 1)
+for(i in 1:2508) {
+  Returns_Toronto$Intraday_return[i] <- log(Returns_Toronto$GSPTSE.Adjusted)[i] - log(Returns_Toronto$Open[i])  
+}
+Returns_Toronto <- Returns_Toronto %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+Returns_Toronto <- na.omit(Returns_Toronto)
 
 
+#Calculate intraday return for the Nikkei 225 index (Tokyo), no lag needed since the Tokyo stock market closes an hour before the Swedish stock market opens. 
+
+Returns_Tokyo <- as.data.frame(N225$N225.Adjusted) %>% mutate(Open = N225$N225.Open)
+Returns_Tokyo <- Returns_Tokyo %>% mutate(Intraday_return = 1)
+for(i in 1:2469) {
+  Returns_Tokyo$Intraday_return[i] <- log(Returns_Tokyo$N225.Adjusted[i]) - log(Returns_Tokyo$Open[i]) 
+}
+Returns_Tokyo <- Returns_Tokyo %>% select(Intraday_return)
+
+# Calculate Hong Kong and Shanghai respective indices Overnight returns 
+
+Returns_Hongkong <- as.data.frame(HSI$HSI.Adjusted) %>% mutate(Open = HSI$HSI.Open)
+Returns_Hongkong <- Returns_Hongkong %>% mutate(Overnight_return = 1)
+
+for(i in 2:2468) {
+  
+  Returns_Hongkong$Overnight_return[i] <- log(Returns_Hongkong$Open[i]) - log(Returns_Hongkong$HSI.Adjusted[i-1])
+
+}
+Returns_Hongkong <- Returns_Hongkong %>% select(Overnight_return) %>% tail(-1)
+Returns_Hongkong <- na.omit(Returns_Hongkong)
+
+### Shanghai overnight return 
+
+Shanghai <- `000001.SS`
+
+Returns_Shanghai <- as.data.frame(Shanghai$`000001.SS.Adjusted`) %>% mutate(Open = Shanghai$`000001.SS.Open`)
+Returns_Shanghai <- Returns_Shanghai %>% mutate(Overnight_return = 1)
+
+for(i in 2:2430) {
+  
+  Returns_Shanghai$Overnight_return[i] <- log(Returns_Shanghai$Open[i]) - log(Returns_Shanghai$`000001.SS.Adjusted`[i-1])
+
+}
+
+Returns_Shanghai <- Returns_Shanghai %>% select(Overnight_return) %>% tail(-1)
+Returns_Shanghai <- na.omit(Returns_Shanghai)
+
+# No lag needed for the intraday returns of commodoties Crude Oil and Natural Gas
+
+## Oil
+Oil <- `CL=F`
+Returns_Oil <- as.data.frame(Oil$`CL=F.Adjusted`) %>% mutate(Open = Oil$`CL=F.Open`)
+Returns_Oil <- Returns_Oil %>% mutate(Intraday_return = 1)
+
+for(i in 1:2517) {
+  Returns_Oil$Intraday_return[i] <- log(Returns_Oil$`CL=F.Adjusted`[i]) - log(Returns_Oil$Open[i]) 
+}
+
+Returns_Oil <- Returns_Oil %>% select(Intraday_return)
+
+## Natural gas 
+
+Natural_gas <- `NG=F`
+Returns_NaturalG <- as.data.frame(Natural_gas$`NG=F.Adjusted`) %>% mutate(Open = Natural_gas$`NG=F.Open`)
+Returns_NaturalG <- Returns_NaturalG %>% mutate(Intraday_return = 1)
+
+for(i in 1:2517) {
+  Returns_NaturalG$Intraday_return[i] <- log(Returns_NaturalG$`NG=F.Adjusted`[i]) - log(Returns_NaturalG$Open[i]) 
+}
+
+Returns_NaturalG <- Returns_NaturalG %>% select(Intraday_return)
+
+# Lag 1 on the intraday log returns of Gold,Silver, USDSEK and EURSEK 
+
+## Gold 
+
+Gold <- `GC=F`
+Returns_Gold <- as.data.frame(Gold$`GC=F.Adjusted`) %>% mutate(Open =Gold$`GC=F.Open`)
+
+Returns_Gold <- Returns_Gold %>% mutate(Intraday_return = 1)
+
+for(i in 2:2517) {
+  Returns_Gold$Intraday_return[i] <- log(Returns_Gold$`GC=F.Adjusted`[i]) - log(Returns_Gold$`GC=F.Adjusted`[i-1]) 
+}
+
+Returns_Gold <- Returns_Gold %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+
+Returns_Gold <- Returns_Gold %>% tail(-2)
+
+## Silver
+
+Silver <- `SI=F`
+Returns_Silver <- as.data.frame(Silver$`SI=F.Adjusted`) %>% mutate(Open =Silver$`SI=F.Open` )
+
+Returns_Silver <- Returns_Silver %>% mutate(Intraday_return = 1)
+
+for(i in 2:2517) {
+  Returns_Silver$Intraday_return[i] <- log(Returns_Silver$`SI=F.Adjusted`[i]) - log(Returns_Silver$`SI=F.Adjusted`[i-1]) 
+}
+
+Returns_Silver <- Returns_Silver %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+
+Returns_Silver <- Returns_Silver %>% tail(-2)
+
+## EURSEK
+
+EUR_SEK <- `EURSEK=X`
+Returns_EURSEK <- as.data.frame(EUR_SEK$`EURSEK=X.Adjusted`) %>% mutate(Open = EUR_SEK$`EURSEK=X.Open`)
+
+Returns_EURSEK <-Returns_EURSEK %>% mutate(Intraday_return = 1)
+
+for(i in 1:2609) {
+  Returns_EURSEK$Intraday_return[i] <- log(Returns_EURSEK$`EURSEK=X.Adjusted`[i]) - log(Returns_EURSEK$Open[i]) 
+  
+}
+
+Returns_EURSEK <- Returns_EURSEK %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+Returns_EURSEK <- na.omit(Returns_EURSEK)
+
+## USDSEK
+
+USD_SEK <- `USDSEK=X`
+Returns_USDSEK <- as.data.frame(USD_SEK$`USDSEK=X.Adjusted`) %>% mutate(Open = USD_SEK$`USDSEK=X.Open`)
+
+Returns_USDSEK <-Returns_USDSEK %>% mutate(Intraday_return = 1)
+
+for(i in 1:2609) {
+  Returns_USDSEK$Intraday_return[i] <- log(Returns_USDSEK$`USDSEK=X.Adjusted`[i]) - log(Returns_USDSEK$Open[i]) 
+  
+}
+
+Returns_USDSEK <- Returns_USDSEK %>% select(Intraday_return) %>% mutate(Intraday_return = lag(Intraday_return))
+Returns_USDSEK <- na.omit(Returns_USDSEK)
+
+# Create a list with all the returns of predictor variables and the response variable 
+
+the_returns <- list(OMX_open, Returns_NasUS, Returns_SP, Returns_Tokyo, Returns_Gold, Returns_Oil, Returns_Silver, Returns_NaturalG, Returns_EURSEK, Returns_USDSEK, Returns_Hongkong, Returns_Shanghai, Returns_Toronto)
+
+# Merge all the returns into the same dataframe on the same dates
+k = 1
+for(i in 1:13) {
+  
+  if(i < 13) { # Samma som ovan
+    if(k < 2) {
+    returns <- merge(the_returns[k], the_returns[i+1], by = 0)
+    rownames(returns) <- returns$Row.names
+    returns <- returns[,-1]
+    
+  } else {
+    returns <- merge(returns, the_returns[i+1], by = 0)
+    rownames(returns) <- returns$Row.names
+    returns <- returns[,-1]
+  }
+  k = k + 1
+  }
+}
+
+# Name the columns in the dataframe 
+colnames(returns) <- c("OMXS30", "NASDAQ_Composite", "SP_500", "Nikkei225","Gold","CrudeOil","Silver","NaturalGas", "EURSEK","USDSEK", "HANG_SENG","SSE_Composite","SP_TSX_Composite")
+
+
+
+# Remove all the NA values in the dataframe 
+
+returns <- na.omit(returns)
+
+# Turn the response variable (log return OMXS30) to a binary variable. If negative the value equals 0 and is set to 1 otherwise. 
+
+for(i in 1:2083) {
+  
+  if(returns[i,1] >= 0) {
+    returns[i,1] = 1
+  } else {
+    returns[i,1] = 0
+  }
+}
+
+# Sample the rows, randomize the order of the observations in the dataframe 
+
+rows <- sample(nrow(returns))
+returns <- returns[rows,]
+
+# Split into train (80%) and test (20%) data sets
+
+train_data <- returns[1:1666,]
+test_data <- returns[1667:2083,-1]
+
+test_data_response <- returns[1667:2083,1]
+
+
+
+# Use caret package and Grid Search to tune the parameters for GBM in selected parameterspace using 10-fold cross validation
+
+gbm_hyper = expand.grid(
+n.trees = c(200,500,800,1000,1500, 1800, 2000, 5000),
+interaction.depth = c(1,2,3,4), 
+shrinkage = c(0.001,0.003,0.005,0.01,0.1),
+n.minobsinnode = c(5,10,20)
+)
+
+train_control <- trainControl(method = "cv",
+                              number = 10, 
+                              classProbs = TRUE,
+                              summaryFunction = twoClassSummary)
+                    
+# Fit GBM-model, evaluating performance of each parameter permutation using "ROC" (AUC score). 
+
+gbm_fit = train(OMXS30 ~ . , 
+                data = train_data,
+                method = "gbm",
+                verbose = FALSE,
+                tuneGrid = gbm_hyper, 
+                trControl =  train_control,
+                metric = "ROC")
+
+
+# Use the GBM model with best "ROC" as our final model on the train data 
+
+gbm_final <- gbm(formula = OMXS30 ~ ., 
+                 distribution = "bernoulli" , 
+                 data = train_data,
+                 n.trees = 1800, 
+                 interaction.depth = 2,
+                 keep.data = T,
+                 cv.folds = 10,
+                 shrinkage = 0.003,
+                 n.minobsinnode = 20)
+
+# Plot summary and visualize relative influence of variables in the model 
+
+gbm_train <- summary(gbm_final, plotit = FALSE)
+gbm_train %>% ggplot() + 
+  geom_bar(aes(x = var, y = rel.inf), stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 1, hjust = 1)) + 
+  ggtitle("Relative influence of all variables") + 
+  ylab("Relative influence")
+  
+# Visualize the optimal number of boosting iterations 
+
+gbm.perf(gbm_final, method = "cv")
+
+# Predict the test data using the optimal number of iterations (trees)
+
+pred <- predict(gbm_final, newdata = test_data , n.trees = 1727, type = "response")
+
+
+# Misclassification error rate for the GBM-model
+
+error_gbm <- 0
+for(i in 1:417) {
+
+  if(pred[i] >= 0.5) {
+    pred[i] = 1
+  }
+  else {
+    pred[i] = 0
+  }
+}
+
+for (i in 1:417) {
+  
+  if(pred[i] != test_data_response[i]) {
+    error_gbm = error_gbm + 1
+  }
+}
+Error_rate <- error_gbm / 417
+Accuracy = 1 - Error_rate
+Accuracy
+
+
+# Random Forest
+
+returns_randomforest <- returns 
+returns_randomforest$OMXS30 <- as.factor(returns_randomforest$OMXS30)
+
+train_data <- returns_randomforest[1:1666,]
+test_data <- returns_randomforest[1667:2083,-1]
+test_data_response <- returns[1667:2083,1]
+
+# Start by building a random forest model on the training data using 5000 trees and two variables considered at each split 
+
+RF_model <- randomForest(OMXS30 ~ ., data = train_data, ntree = 5000, mtry = 2)
+RF_model
+
+# Vizualize the OOB-error of the RF model (Code taken from https://www.youtube.com/watch?v=6EXPYzbfLCE) 
+
+OOB_error <- data.frame(Trees = rep(1:nrow(RF_model$err.rate), times = 3),
+                        Type = rep(c("OOB","0","1"), each = nrow(RF_model$err.rate)), 
+                        Error = c(RF_model$err.rate[,"OOB"], 
+                                  RF_model$err.rate[,"0"], 
+                                  RF_model$err.rate[,"1"])) 
+
+ggplot(data = OOB_error, aes(x = Trees, y = Error )) + geom_line(aes(color=Type)) + ggtitle("Error rates after making n trees")
+
+# Optimal number of variables for each variable split 
+
+values <- data.frame(1:11, 1:11)
+colnames(values) <- c("Variables each split", "OOB error rate")
+
+for(i in 1:11) {
+  model <- randomForest(OMXS30 ~ . , data = train_data, ntree = 5000, mtry = i)
+  values[i,1] <- i
+  values[i,2] <- model$err.rate[nrow(model$err.rate), 1]
+}
+
+# Our final RF-model 
+
+final_RF <- randomForest(OMXS30 ~ . , data = train_data, ntree = 5000, mtry = 2)
+
+# Predict test data 
+
+RF_pred <- predict(final_RF, newdata = test_data , n.trees = 5000, type = "response")
+
+# Misclassification error rate for RF:
+
+error_RF <- 0
+
+for (i in 1:417) {
+  
+  if(RF_pred[i] != test_data_response[i]) {
+    error_RF = error_RF + 1
+  }
+}
+
+Error_rate_RF <- error_RF / 417
+Accuracy_RF <- 1 - Error_rate_RF
+Accuracy
 
 ```
 
