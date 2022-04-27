@@ -1,1 +1,1 @@
-R / Python code from school projects.
+R / Python code from school projects and Bachelor Thesis in mathematical statistics. 
