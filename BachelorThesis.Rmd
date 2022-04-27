@@ -3,5 +3,16 @@ Author: Filip Bergkvist
 
 This is the code used for the thesis: 
 
+```{r}
 
 tickers = c("^OMX", "^GSPC", "^N225","^IXIC", "GC=F", "CL=F", "SI=F", "NG=F","USDSEK=X","EURSEK=X", "^GSPTSE", "^HSI", "000001.SS") 
+getSymbols(tickers, src="yahoo", from = '2010-01-01', to = "2020-01-01")
+
+
+
+
+```
+
+
+
+
