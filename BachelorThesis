@@ -1,1 +1,7 @@
+Gradient Boosting vs Random Forests: Predicting the Overnight Return of the OMXS30-index. 
+Author: Filip Bergkvist
 
+This is the code used for the thesis: 
+
+
+tickers = c("^OMX", "^GSPC", "^N225","^IXIC", "GC=F", "CL=F", "SI=F", "NG=F","USDSEK=X","EURSEK=X", "^GSPTSE", "^HSI", "000001.SS") 
